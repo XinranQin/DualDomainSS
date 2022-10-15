@@ -270,7 +270,7 @@ for epoch_i in range(start_epoch, end_epoch + 1):
         optimizer.zero_grad()
         loss_all.backward()
         optimizer.step()
-    if epoch_i % 10 == 0:
+    if epoch_i == end_epoch:
 
         os.makedirs("./%s/" % (model_dir), exist_ok=True)
         torch.save(model.state_dict(),
