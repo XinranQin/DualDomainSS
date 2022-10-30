@@ -126,6 +126,7 @@ class BasicBlock(torch.nn.Module):
         self.conv3 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.bias = nn.Parameter(torch.full([32], 0.01))
         self.conv4 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
+        self.bias1 = nn.Parameter(torch.full([32], 0.01))
         self.conv5 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.conv6 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.conv7 = nn.Parameter(init.xavier_normal_(torch.Tensor(16, 32, 3, 3)))
@@ -144,12 +145,12 @@ class BasicBlock(torch.nn.Module):
         x_forward = F.relu(x_forward)
         x_forward = F.conv2d(x_forward, self.conv3, bias=self.bias, padding=1)
         x_forward = F.relu(x_forward)
-        x = F.conv2d(x_forward, self.conv4, padding=1)
+        x = F.conv2d(x_forward, self.conv4, bias=self.bias, padding=1)
         x = F.relu(x)
         x = F.conv2d(x, self.conv5, padding=1)
         x = F.relu(x)
         x = F.conv2d(x, self.conv6, padding=1)
-        x = F.relu(x)+x_forward
+        x = F.relu(x)
         x = F.conv2d(x, self.conv7, padding=1)
         x_G = F.conv2d(x, self.conv_G, padding=1)
         x_pred = x_input + x_G
