@@ -114,17 +114,17 @@ class BasicBlock(torch.nn.Module):
 
         self.lambda_step = nn.Parameter(torch.Tensor([0.5]))
 
-        self.conv_D = nn.Parameter(init.xavier_normal_(torch.Tensor(16, 1, 3, 3)))
+        self.conv_D = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 1, 3, 3)))
 
-        self.conv1 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 16, 3, 3)))
+        self.conv1 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.conv2 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.conv3 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.bias = nn.Parameter(torch.full([32], 0.01))
         self.conv4 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.conv5 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.conv6 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
-        self.conv7 = nn.Parameter(init.xavier_normal_(torch.Tensor(16, 32, 3, 3)))
-        self.conv_G = nn.Parameter(init.xavier_normal_(torch.Tensor(1, 16, 3, 3)))
+        self.conv7 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
+        self.conv_G = nn.Parameter(init.xavier_normal_(torch.Tensor(1, 32, 3, 3)))
 
     def forward(self, x, PhiTPhi, PhiTb):
         x = x - self.lambda_step * torch.mm(x, PhiTPhi)
