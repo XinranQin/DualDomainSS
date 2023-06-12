@@ -234,7 +234,7 @@ class RandomDataset(Dataset):
 
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-model_dir = "./%s/DDSS_%d_ratio_%d_lr_%.4f_unsuper_diss" % (args.model_dir, layer_num, cs_ratio, learning_rate)
+model_dir = "./%s/DDSS_%d_ratio_%d_lr_%.4f_unsuper" % (args.model_dir, layer_num, cs_ratio, learning_rate)
 
 if not os.path.exists(model_dir):
     os.makedirs(model_dir)

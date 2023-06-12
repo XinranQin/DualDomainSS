@@ -60,7 +60,9 @@ Training_data = sio.loadmat('./%s/%s' % (args.data_dir, Training_data_Name))
 Training_labels = Training_data['labels']
 Training_labels = Training_labels
 Qinit = np.linalg.pinv(Phi_input)
-
+Noise_name = './%s/noise_%d.mat' % (args.data_dir, cs_ratio)
+N = sio.loadmat('%s' % ( Noise_name))
+Noise = N['Noise']
 
 def imread_CS_py(Iorg):
     block_size = 33
@@ -209,7 +211,7 @@ class RandomDataset(Dataset):
         self.len = length
 
     def __getitem__(self, index):
-        return torch.Tensor(self.data[index, :]).float()
+        return torch.Tensor(self.data[index, :]).float(),torch.Tensor(Noise[:,index]).float()
 
     def __len__(self):
         return self.len
@@ -219,7 +221,7 @@ rand_loader = DataLoader(dataset=RandomDataset(Training_labels, nrtrain), batch_
 
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-model_dir = "./%s/DDSS_%d_ratio_%d_lr_%.4f_unsuper" % (args.model_dir, layer_num, cs_ratio, learning_rate)
+model_dir = "./%s/DDSS_%d_ratio_%d_lr_%.4f_unsuper_noise" % (args.model_dir, layer_num, cs_ratio, learning_rate)
 
 if not os.path.exists(model_dir):
     os.makedirs(model_dir)
@@ -248,11 +250,11 @@ for epoch_i in range(start_epoch, end_epoch + 1):
         batch_x = data
         batch_x = batch_x.to(0)
         Phix = torch.mm(batch_x, torch.transpose(Phi, 0, 1))
-        gamma = (torch.FloatTensor(Phix.size()).normal_(mean=0, std=2 / 255).cuda())
+        gamma = (torch.FloatTensor(Phix.size()).normal_(mean=0, std=10 / 255).cuda())
         x_output = model(Phix + gamma, Phi, Qinit)
         ## loss in range domain
         loss_range = torch.mean(
-            torch.pow(torch.mm(x_output, torch.transpose(Phi, 0, 1)) - (Phix), 2))
+            torch.pow(torch.mm(x_output, torch.transpose(Phi, 0, 1)) - (Phix - gamma), 2))
         ## sampling r
         z = x_output
         PhiNx = torch.mm(z, torch.transpose(Phi, 0, 1))
