@@ -172,7 +172,7 @@ class BasicBlock(torch.nn.Module):
         x = F.conv2d(x, self.conv7, padding=1)
         x_G = F.conv2d(x, self.conv_G, padding=1)
         x_pred = x_input + x_G
-        x_pred = x.view(-1, 33*33)
+        x_pred = x_pred.view(-1, 33*33)
         #x_pred = img2col_torch(x_pred[0, 0], 33)
 
         return x_pred
