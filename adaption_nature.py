@@ -17,7 +17,7 @@ parser = ArgumentParser(description='Dual-Domain-newtwork')
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
 oju8parser = ArgumentParser(description='Unroll-Net-plus')
-parser.add_argument('--epoch', type=int, default=0, help='epoch number of test')
+parser.add_argument('--epoch', type=int, default=390, help='epoch number of test')
 parser.add_argument('--layer_num', type=int, default=12, help='phase number of ISTA-Net-plus')
 parser.add_argument('--learning_rate', type=float, default=1e-4, help='learning rate')
 parser.add_argument('--cs_ratio', type=int, default=25, help='from {1, 4, 10, 25, 40, 50}')
@@ -145,7 +145,6 @@ class BasicBlock(torch.nn.Module):
         self.conv4 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.bias1 = nn.Parameter(torch.full([32], 0.01))
         self.conv5 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
-        self.bias2 = nn.Parameter(torch.full([32], 0.01))
         self.conv6 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.conv7 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.conv_G = nn.Parameter(init.xavier_normal_(torch.Tensor(1, 32, 3, 3)))
@@ -161,9 +160,9 @@ class BasicBlock(torch.nn.Module):
         x = F.relu(x)
         x_forward = F.conv2d(x, self.conv2, bias=self.bias, padding=1)
         x_forward = F.relu(x_forward)
-        x_forward = F.conv2d(x_forward, self.conv3, bias=self.bias1, padding=1)
+        x_forward = F.conv2d(x_forward, self.conv3, bias=self.bias, padding=1)
         x_forward = F.relu(x_forward)
-        x = F.conv2d(x_forward, self.conv4,bias=self.bias2, padding=1)
+        x = F.conv2d(x_forward, self.conv4,bias=self.bias, padding=1)
         x = F.relu(x)
         x = F.conv2d(x, self.conv5, padding=1)
         x = F.relu(x)
@@ -264,7 +263,7 @@ PSNR_All = np.zeros([1, ImgNum], dtype=np.float32)
 SSIM_All = np.zeros([1, ImgNum], dtype=np.float32)
 inner_loop = 200
 for img_no in range(ImgNum):
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate*1)
     imgName = filepaths[img_no]
     Img = cv2.imread(imgName, 1)
     Img_yuv = cv2.cvtColor(Img, cv2.COLOR_BGR2YCrCb)

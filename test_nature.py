@@ -17,7 +17,7 @@ parser = ArgumentParser(description='Dual-Domain-newtwork')
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
 oju8parser = ArgumentParser(description='Unroll-Net-plus')
-parser.add_argument('--epoch', type=int, default=0, help='epoch number of test')
+parser.add_argument('--epoch', type=int, default=400, help='epoch number of test')
 parser.add_argument('--layer_num', type=int, default=12, help='phase number of ISTA-Net-plus')
 parser.add_argument('--learning_rate', type=float, default=1e-4, help='learning rate')
 parser.add_argument('--cs_ratio', type=int, default=25, help='from {1, 4, 10, 25, 40, 50}')
@@ -145,7 +145,6 @@ class BasicBlock(torch.nn.Module):
         self.conv4 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.bias1 = nn.Parameter(torch.full([32], 0.01))
         self.conv5 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
-        self.bias2 = nn.Parameter(torch.full([32], 0.01))
         self.conv6 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.conv7 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.conv_G = nn.Parameter(init.xavier_normal_(torch.Tensor(1, 32, 3, 3)))
@@ -161,9 +160,9 @@ class BasicBlock(torch.nn.Module):
         x = F.relu(x)
         x_forward = F.conv2d(x, self.conv2, bias=self.bias, padding=1)
         x_forward = F.relu(x_forward)
-        x_forward = F.conv2d(x_forward, self.conv3, bias=self.bias1, padding=1)
+        x_forward = F.conv2d(x_forward, self.conv3, bias=self.bias, padding=1)
         x_forward = F.relu(x_forward)
-        x = F.conv2d(x_forward, self.conv4,bias=self.bias2, padding=1)
+        x = F.conv2d(x_forward, self.conv4,bias=self.bias, padding=1)
         x = F.relu(x)
         x = F.conv2d(x, self.conv5, padding=1)
         x = F.relu(x)
@@ -232,8 +231,6 @@ class RandomDataset(Dataset):
     def __len__(self):
         return self.len
 
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
 model_dir = "./%s/DDSS_%d_ratio_%d_lr_%.4f_unsuper" % (args.model_dir, layer_num, cs_ratio, learning_rate)
 
 if not os.path.exists(model_dir):
@@ -264,40 +261,66 @@ filepaths = glob.glob(test_dir + '/*.tif')
 ImgNum = len(filepaths)
 PSNR_All = np.zeros([1, ImgNum], dtype=np.float32)
 SSIM_All = np.zeros([1, ImgNum], dtype=np.float32)
-with torch.no_grad():
-    for img_no in range(ImgNum):
-        imgName = filepaths[img_no]
-        Img = cv2.imread(imgName, 1)
-        Img_yuv = cv2.cvtColor(Img, cv2.COLOR_BGR2YCrCb)
-        Img_rec_yuv = Img_yuv.copy()
-        Iorg_y = Img_yuv[:, :, 0]
-        [Iorg, row, col, Ipad, row_new, col_new] = imread_CS_py(Iorg_y)
-        Icol = img2col_py(Ipad, 33).transpose() / 255.0
-        Img_output = Icol
-        start = time()
-        batch_x = torch.from_numpy(Img_output)
-        batch_x = batch_x.type(torch.FloatTensor)
-        batch_x = batch_x.to(device)
-        Phix = torch.mm(batch_x, torch.transpose(Phi, 0, 1))
+inner_loop = 200
+for img_no in range(ImgNum):
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate*1.5)
+    imgName = filepaths[img_no]
+    Img = cv2.imread(imgName, 1)
+    Img_yuv = cv2.cvtColor(Img, cv2.COLOR_BGR2YCrCb)
+    Img_rec_yuv = Img_yuv.copy()
+    Iorg_y = Img_yuv[:, :, 0]
+    [Iorg, row, col, Ipad, row_new, col_new] = imread_CS_py(Iorg_y)
+    Icol = img2col_py(Ipad, 33).transpose() / 255.0
+    Img_output = Icol
+    start = time()
+    batch_x = torch.from_numpy(Img_output)
+    batch_x = batch_x.type(torch.FloatTensor)
+    batch_x = batch_x.to(device)
+    Phix = torch.mm(batch_x, torch.transpose(Phi, 0, 1))
+    for i in range(inner_loop):
+        gamma = (torch.FloatTensor(Phix.size()).normal_(mean=0, std=2 / 255).cuda())
+        x_output = model(Phix + gamma, Phi, Qinit)
+        ## loss in range domain
+        loss_range = torch.mean(
+            torch.pow(torch.mm(x_output, torch.transpose(Phi, 0, 1)) - (Phix), 2))
+        ## sampling r
+        z = x_output
+        PhiNx = torch.mm(z, torch.transpose(Phi, 0, 1))
+        z_prime = model(PhiNx, Phi, Qinit)
+        res = (z_prime - z).view(-1, 1, 33, 33)
+        mask = torch.ones_like(res)
+        mask = F.dropout(mask, 0.5) * 0.5
+        mask = torch.where(mask == 0, -1 * mask, mask)
+        r = (mask * res.detach()).view(-1, 1089)
+        PhiNx = torch.mm(x_output.detach() + r, torch.transpose(Phi, 0, 1))
+        x_input1 = PhiNx
+        x_output1 = model(x_input1, Phi, Qinit)
+        # loss in image domian
+        loss_image = torch.mean(torch.pow(x_output1 - (x_output - r), 2))
+        loss_all = loss_range + 0.1 * (loss_image)
+        optimizer.zero_grad()
+        loss_all.backward()
+        optimizer.step()
+    with torch.no_grad():
         x_output = model(Phix, Phi, Qinit)
         end = time()
-        Prediction_value = x_output.cpu().data.numpy()
-        X_rec = np.clip(col2im_CS_py(Prediction_value.transpose(), row, col, row_new, col_new), 0, 1)
-        rec_PSNR = psnr(X_rec * 255, Iorg.astype(np.float64))
-        rec_SSIM = ssim(X_rec * 255, Iorg.astype(np.float64), data_range=255)
+    Prediction_value = x_output.cpu().data.numpy()
+    X_rec = np.clip(col2im_CS_py(Prediction_value.transpose(), row, col, row_new, col_new), 0, 1)
+    rec_PSNR = psnr(X_rec * 255, Iorg.astype(np.float64))
+    rec_SSIM = ssim(X_rec * 255, Iorg.astype(np.float64), data_range=255)
 
-        print("[%02d/%02d] Run time for %s , PSNR is %.2f, SSIM is %.4f" % (
-            img_no, ImgNum, imgName, rec_PSNR, rec_SSIM))
+    print("[%02d/%02d] Run time for %s , PSNR is %.2f, SSIM is %.4f" % (
+        img_no, ImgNum, imgName, rec_PSNR, rec_SSIM))
 
-        Img_rec_yuv[:, :, 0] = X_rec * 255
+    Img_rec_yuv[:, :, 0] = X_rec * 255
 
-        im_rec_rgb = cv2.cvtColor(Img_rec_yuv, cv2.COLOR_YCrCb2BGR)
-        im_rec_rgb = np.clip(im_rec_rgb, 0, 255).astype(np.uint8)
+    im_rec_rgb = cv2.cvtColor(Img_rec_yuv, cv2.COLOR_YCrCb2BGR)
+    im_rec_rgb = np.clip(im_rec_rgb, 0, 255).astype(np.uint8)
 
-        resultName = imgName.replace(args.data_dir, args.result_dir)
+    resultName = imgName.replace(args.data_dir, args.result_dir)
 
-        PSNR_All[0, img_no] = rec_PSNR
-        SSIM_All[0, img_no] = rec_SSIM
+    PSNR_All[0, img_no] = rec_PSNR
+    SSIM_All[0, img_no] = rec_SSIM
 
 print('\n')
 output_data = "CS ratio is %d, Avg PSNR/SSIM for %s is %.2f/%.4f, Epoch number of model is %d \n" % (
