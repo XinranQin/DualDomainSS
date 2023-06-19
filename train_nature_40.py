@@ -17,10 +17,11 @@ parser = ArgumentParser(description='Dual-Domain-newtwork')
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
 oju8parser = ArgumentParser(description='Unroll-Net-plus')
-parser.add_argument('--epoch', type=int, default=400, help='epoch number of test')
+parser.add_argument('--start_epoch', type=int, default=0, help='epoch number of start training')
+parser.add_argument('--end_epoch', type=int, default=400, help='epoch number of end training')
 parser.add_argument('--layer_num', type=int, default=12, help='phase number of ISTA-Net-plus')
 parser.add_argument('--learning_rate', type=float, default=1e-4, help='learning rate')
-parser.add_argument('--cs_ratio', type=int, default=25, help='from {1, 4, 10, 25, 40, 50}')
+parser.add_argument('--cs_ratio', type=int, default=40, help='from {1, 4, 10, 25, 40, 50}')
 parser.add_argument('--gpu_list', type=str, default='0', help='gpu index')
 
 parser.add_argument('--matrix_dir', type=str, default='sampling_matrix', help='sampling matrix directory')
@@ -32,7 +33,8 @@ parser.add_argument('--test_name', type=str, default='Set11', help='name of test
 
 args = parser.parse_args()
 
-epoch = args.epoch
+start_epoch = args.start_epoch
+end_epoch = args.end_epoch
 learning_rate = args.learning_rate
 layer_num = args.layer_num
 cs_ratio = args.cs_ratio
@@ -53,7 +55,10 @@ batch_size = 64
 Phi_data_Name = './%s/phi_0_%d_1089.mat' % (args.matrix_dir, cs_ratio)
 Phi_data = sio.loadmat(Phi_data_Name)
 Phi_input = Phi_data['phi']
-
+Training_data_Name = 'Training_Data.mat'
+Training_data = sio.loadmat('./%s/%s' % (args.data_dir, Training_data_Name))
+Training_labels = Training_data['labels']
+Training_labels = Training_labels
 Qinit = np.linalg.pinv(Phi_input)
 
 
@@ -68,28 +73,6 @@ def imread_CS_py(Iorg):
 
     return [Iorg, row, col, Ipad, row_new, col_new]
 
-
-def col2im_CS_torch(X_col, row_new, col_new):
-    block_size = 33
-    r_b = row_new // 33
-    c_b = col_new // 33
-    X_col = X_col.view(r_b, c_b, block_size, block_size)
-    X_col = X_col.permute(0, 2, 1, 3)
-    X_rec = torch.reshape(X_col, (-1, col_new))
-    X_rec = torch.reshape(X_rec, (row_new, col_new))
-
-    return X_rec.unsqueeze(0).unsqueeze(1)
-
-
-def img2col_torch(Ipad, block_size):
-    [row, col] = Ipad.shape
-    img_col = Ipad.view(-1, block_size, col)
-    img_col = img_col.view(img_col.shape[0], block_size, -1, block_size)
-    img_col = img_col.permute(0, 2, 1, 3)
-    img_col = torch.reshape(img_col, (-1, 1, block_size, block_size))
-    img_col = torch.reshape(img_col, (-1, block_size * block_size))
-
-    return img_col
 
 def img2col_py(Ipad, block_size):
     [row, col] = Ipad.shape
@@ -154,7 +137,7 @@ class BasicBlock(torch.nn.Module):
         x = x + self.lambda_step * PhiTb
 
         x_input = x.view(-1, 1, 33, 33)
-        # x_input = col2im_CS_torch(x_input, row_new, col_new)
+
         x_D = F.conv2d(x_input, self.conv_D, padding=1)
         x = F.conv2d(x_D, self.conv1, padding=1)
         x = F.relu(x)
@@ -162,7 +145,7 @@ class BasicBlock(torch.nn.Module):
         x_forward = F.relu(x_forward)
         x_forward = F.conv2d(x_forward, self.conv3, bias=self.bias, padding=1)
         x_forward = F.relu(x_forward)
-        x = F.conv2d(x_forward, self.conv4,bias=self.bias, padding=1)
+        x = F.conv2d(x_forward, self.conv4, bias=self.bias, padding=1)
         x = F.relu(x)
         x = F.conv2d(x, self.conv5, padding=1)
         x = F.relu(x)
@@ -171,8 +154,8 @@ class BasicBlock(torch.nn.Module):
         x = F.conv2d(x, self.conv7, padding=1)
         x_G = F.conv2d(x, self.conv_G, padding=1)
         x_pred = x_input + x_G
-        x_pred = x_pred.view(-1, 33*33)
-        #x_pred = img2col_torch(x_pred[0, 0], 33)
+
+        x_pred = x_pred.view(-1, 1089)
 
         return x_pred
 
@@ -231,14 +214,19 @@ class RandomDataset(Dataset):
     def __len__(self):
         return self.len
 
+rand_loader = DataLoader(dataset=RandomDataset(Training_labels, nrtrain), batch_size=batch_size, num_workers=0,
+                             shuffle=True)
+
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
 model_dir = "./%s/DDSS_%d_ratio_%d_lr_%.4f_unsuper" % (args.model_dir, layer_num, cs_ratio, learning_rate)
 
 if not os.path.exists(model_dir):
     os.makedirs(model_dir)
 
-if epoch > 0:
+if start_epoch > 0:
     pre_model_dir = model_dir
-    model.load_state_dict(torch.load('%s/net_params_%d.pkl' % (pre_model_dir, epoch)))
+    model.load_state_dict(torch.load('%s/net_params_%d.pkl' % (pre_model_dir, start_epoch)))
 
 Phi = torch.from_numpy(Phi_input).type(torch.FloatTensor)
 Phi = Phi.to(device)
@@ -253,31 +241,13 @@ def together(inputs, S, H, L):
     inputs = torch.cat(torch.split(inputs, split_size_or_sections=S, dim=0), dim=1)
     return inputs
 
-mse = nn.MSELoss()
-# Training loop
 
-test_dir = os.path.join(args.data_dir, args.test_name)
-filepaths = glob.glob(test_dir + '/*.tif')
-ImgNum = len(filepaths)
-PSNR_All = np.zeros([1, ImgNum], dtype=np.float32)
-SSIM_All = np.zeros([1, ImgNum], dtype=np.float32)
-inner_loop = 200
-for img_no in range(ImgNum):
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate*1.5)
-    imgName = filepaths[img_no]
-    Img = cv2.imread(imgName, 1)
-    Img_yuv = cv2.cvtColor(Img, cv2.COLOR_BGR2YCrCb)
-    Img_rec_yuv = Img_yuv.copy()
-    Iorg_y = Img_yuv[:, :, 0]
-    [Iorg, row, col, Ipad, row_new, col_new] = imread_CS_py(Iorg_y)
-    Icol = img2col_py(Ipad, 33).transpose() / 255.0
-    Img_output = Icol
-    start = time()
-    batch_x = torch.from_numpy(Img_output)
-    batch_x = batch_x.type(torch.FloatTensor)
-    batch_x = batch_x.to(device)
-    Phix = torch.mm(batch_x, torch.transpose(Phi, 0, 1))
-    for i in range(inner_loop):
+# Training loop
+for epoch_i in range(start_epoch, end_epoch + 1):
+    for data in rand_loader:
+        batch_x = data
+        batch_x = batch_x.to(0)
+        Phix = torch.mm(batch_x, torch.transpose(Phi, 0, 1))
         gamma = (torch.FloatTensor(Phix.size()).normal_(mean=0, std=2 / 255).cuda())
         x_output = model(Phix + gamma, Phi, Qinit)
         ## loss in range domain
@@ -301,32 +271,7 @@ for img_no in range(ImgNum):
         optimizer.zero_grad()
         loss_all.backward()
         optimizer.step()
-    with torch.no_grad():
-        x_output = model(Phix, Phi, Qinit)
-        end = time()
-    Prediction_value = x_output.cpu().data.numpy()
-    X_rec = np.clip(col2im_CS_py(Prediction_value.transpose(), row, col, row_new, col_new), 0, 1)
-    rec_PSNR = psnr(X_rec * 255, Iorg.astype(np.float64))
-    rec_SSIM = ssim(X_rec * 255, Iorg.astype(np.float64), data_range=255)
-
-    print("[%02d/%02d] Run time for %s , PSNR is %.2f, SSIM is %.4f" % (
-        img_no, ImgNum, imgName, rec_PSNR, rec_SSIM))
-
-    Img_rec_yuv[:, :, 0] = X_rec * 255
-
-    im_rec_rgb = cv2.cvtColor(Img_rec_yuv, cv2.COLOR_YCrCb2BGR)
-    im_rec_rgb = np.clip(im_rec_rgb, 0, 255).astype(np.uint8)
-
-    resultName = imgName.replace(args.data_dir, args.result_dir)
-
-    PSNR_All[0, img_no] = rec_PSNR
-    SSIM_All[0, img_no] = rec_SSIM
-
-print('\n')
-output_data = "CS ratio is %d, Avg PSNR/SSIM for %s is %.2f/%.4f, Epoch number of model is %d \n" % (
-    cs_ratio, args.test_name, np.mean(PSNR_All), np.mean(SSIM_All), epoch)
-print(output_data)
-
-
-
-
+    if epoch_i % 10 == 0:
+        os.makedirs("./%s/" % (model_dir), exist_ok=True)
+        torch.save(model.state_dict(),
+                   "./%s/net_params_%d.pkl" % (model_dir, epoch_i))  # save only the parameters
