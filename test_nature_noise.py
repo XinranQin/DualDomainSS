@@ -145,7 +145,6 @@ class BasicBlock(torch.nn.Module):
         self.conv4 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.bias1 = nn.Parameter(torch.full([32], 0.01))
         self.conv5 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
-        self.bias2 = nn.Parameter(torch.full([32], 0.01))
         self.conv6 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.conv7 = nn.Parameter(init.xavier_normal_(torch.Tensor(32, 32, 3, 3)))
         self.conv_G = nn.Parameter(init.xavier_normal_(torch.Tensor(1, 32, 3, 3)))
@@ -161,9 +160,9 @@ class BasicBlock(torch.nn.Module):
         x = F.relu(x)
         x_forward = F.conv2d(x, self.conv2, bias=self.bias, padding=1)
         x_forward = F.relu(x_forward)
-        x_forward = F.conv2d(x_forward, self.conv3, bias=self.bias1, padding=1)
+        x_forward = F.conv2d(x_forward, self.conv3, bias=self.bias, padding=1)
         x_forward = F.relu(x_forward)
-        x = F.conv2d(x_forward, self.conv4,bias=self.bias2, padding=1)
+        x = F.conv2d(x_forward, self.conv4,bias=self.bias, padding=1)
         x = F.relu(x)
         x = F.conv2d(x, self.conv5, padding=1)
         x = F.relu(x)
@@ -172,7 +171,7 @@ class BasicBlock(torch.nn.Module):
         x = F.conv2d(x, self.conv7, padding=1)
         x_G = F.conv2d(x, self.conv_G, padding=1)
         x_pred = x_input + x_G
-        x_pred = x_pred.view(-1, 33*33)
+        x_pred = x.view(-1, 33*33)
         #x_pred = img2col_torch(x_pred[0, 0], 33)
 
         return x_pred
@@ -258,7 +257,7 @@ def together(inputs, S, H, L):
 
 mse = nn.MSELoss()
 # Training loop
-ensemble_times = 10
+
 test_dir = os.path.join(args.data_dir, args.test_name)
 filepaths = glob.glob(test_dir + '/*.tif')
 ImgNum = len(filepaths)
@@ -279,13 +278,10 @@ with torch.no_grad():
         batch_x = batch_x.type(torch.FloatTensor)
         batch_x = batch_x.to(device)
         Phix = torch.mm(batch_x, torch.transpose(Phi, 0, 1))
-        Phix = Phix + (torch.FloatTensor(Phix.size()).normal_(mean=0, std=10 / 255).cuda())
-        X_output = model(Phix, Phi, Qinit)
-        for i in range(ensemble_times-1):
-            x_output = model(Phix, Phi, Qinit)
-            X_output = X_output + x_output
+        Phix = Phix+(torch.FloatTensor(Phix.size()).normal_(mean=0, std=10 / 255).cuda())
+        x_output = model(Phix, Phi, Qinit)
         end = time()
-        Prediction_value = x_output.cpu().data.numpy()/ensemble_times
+        Prediction_value = x_output.cpu().data.numpy()
         X_rec = np.clip(col2im_CS_py(Prediction_value.transpose(), row, col, row_new, col_new), 0, 1)
         rec_PSNR = psnr(X_rec * 255, Iorg.astype(np.float64))
         rec_SSIM = ssim(X_rec * 255, Iorg.astype(np.float64), data_range=255)
